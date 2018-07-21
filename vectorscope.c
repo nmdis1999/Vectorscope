@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  for (unsigned i = 1; i <= NUM_ROWS / 2; i++) {
+  for (unsigned i = 0; i < NUM_ROWS / 2; i++) {
     fprintf(fp, "%lf \t %f \t %f \n", luminance[i], u_val[i], v_val[i]);
   }
 
