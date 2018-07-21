@@ -1,18 +1,13 @@
-/**********************************************************************
-**  vectorscope.c
-**
-**	Calculate value of Luminance and Chrominance for RAW file
-**	Version 1.0
-**
-**  Copyright (C) 2018 Iti Shree
-**
-**	This program is free software: you can redistribute it and/or
-**	modify it under the terms of the GNU General Public License
-**	as published by the Free Software Foundation, either version
-**	2 of the License, or (at your option) any later version.
-**
-**********************************************************************/
+/***************************************************
+ Cpoyright (C) 2018 Iti Shree
 
+This tool intends to calculate luminance of a raw12
+image and write the data so obtained into a text
+file. The text file could be used to generate graph
+and observe the variation in value of luminance in
+the image.
+
+***************************************************/
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,6 +17,7 @@
 #include <unistd.h>
 
 #include <fcntl.h>
+#include <math.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -30,11 +26,13 @@ static char *cmd_name = NULL;
 
 #define NUM_COLS 4096
 #define NUM_ROWS 3072
-
 #define NUM_POINTS (NUM_ROWS / 2) * NUM_ROWS
 
 #define u_max 0.436
 #define v_max 0.615
+#define gamma 0.5
+
+#define ERR_WRITE 1
 
 static uint32_t map_size = 0x08000000;
 static uint32_t map_base = 0x18000000;
@@ -45,6 +43,37 @@ static char *dev_mem = "/dev/mem";
 static double luminance[NUM_POINTS];
 static double u_val[NUM_POINTS];
 static double v_val[NUM_POINTS];
+
+void gamma_correction(double *buf, uint64_t *ptr) {
+
+  for (unsigned i = 0; i < NUM_COLS / 2; i++) {
+    unsigned ce = i * 3;
+    unsigned co = (i + NUM_COLS / 2) * 3;
+
+    buf[ce + 0] = 255 * pow(buf[ce + 0] / 255, gamma);
+    buf[ce + 1] = 255 * pow(buf[ce + 1] / 255, gamma);
+    buf[ce + 2] = 255 * pow(buf[ce + 2] / 255, gamma);
+
+    buf[co + 0] = 255 * pow(buf[co + 0] / 255, gamma);
+    buf[co + 1] = 255 * pow(buf[co + 1] / 255, gamma);
+    buf[co + 2] = 255 * pow(buf[co + 2] / 255, gamma);
+  }
+}
+
+void copy_data(uint8_t *buf, double *norm_buf, uint64_t *ptr) {
+  for (unsigned i = 0; i < NUM_COLS / 2; i++) {
+    unsigned ce = i * 3;
+    unsigned co = (i + NUM_COLS / 2) * 3;
+
+    norm_buf[ce + 0] = buf[ce + 0];
+    norm_buf[ce + 1] = buf[ce + 1];
+    norm_buf[ce + 2] = buf[ce + 2];
+
+    norm_buf[co + 0] = buf[co + 0];
+    norm_buf[co + 1] = buf[co + 1];
+    norm_buf[co + 2] = buf[co + 2];
+  }
+}
 
 void load_data(uint8_t *buf, uint64_t *ptr) {
 
@@ -139,47 +168,41 @@ int main(int argc, char **argv) {
     }
   }
   uint8_t buf[NUM_COLS * 3];
+  double norm_buf[NUM_COLS * 3];
   uint64_t *ptr = base;
-  unsigned count = 0;
+  unsigned count = 0, count2;
 
   for (unsigned j = 0; j < NUM_ROWS / 2; j++) {
     load_data(buf, ptr);
+    copy_data(buf, norm_buf, ptr);
+    gamma_correction(norm_buf, ptr);
     ptr += NUM_COLS / 2;
   }
 
   for (unsigned j = 0; j < NUM_ROWS / 2; j++) {
-    for (unsigned i = 0; i < NUM_ROWS; i++) {
+    for (unsigned i = 0; i < NUM_ROWS / 2; i++) {
       unsigned ce = i * 4;
-      luminance[count] = 0.299 * buf[ce] +
-                         (0.587 * buf[ce + 1] + 0.587 * buf[ce + 2]) / 2 +
-                         0.114 * buf[ce + 3];
-      u_val[count] = u_max * (buf[i + 3] - luminance[i]);
-      v_val[count] = v_max * (buf[i] - luminance[i]);
+      unsigned co = (i + NUM_COLS / 2) * 4;
+      count2 = (count + NUM_ROWS / 2);
+      luminance[count] =
+          0.299 * norm_buf[ce] +
+          (0.587 * norm_buf[ce + 1] + 0.587 * norm_buf[ce + 2]) / 2 +
+          0.114 * norm_buf[ce + 3];
+      luminance[count2] =
+          0.299 * norm_buf[co] +
+          (0.587 * norm_buf[co + 1] + 0.587 * norm_buf[co + 2]) / 2 +
+          0.114 * norm_buf[co + 3];
+      u_val[count] = u_max * (norm_buf[ce + 3] - luminance[i]);
+      u_val[count2] = u_max * (norm_buf[co + 3] - luminance[i]);
+      v_val[count] = v_max * (norm_buf[ce] - luminance[i]);
+      v_val[count2] = v_max * (norm_buf[co] - luminance[i]);
       count++;
     }
   }
 
-  /*for (unsigned i = 0; i < 4; i++)
-   printf("%u\t", buf[i]);
-
-   printf("\n");
-
-   for (unsigned i = 0; i <10; i++) {
-     printf("%lf\t", luminance[i]);
-   }
-
-   printf("\n");
-
-   for (unsigned i = 0; i <10; i++) {
-     printf("%lf\t", u_val[i]);
-   }
-   printf("\n");
-
-   for (unsigned i = 0; i <10; i++) {
-     printf("%lf\t", v_val[i]);
-   }*/
-
-  char *output = "vectorscope.txt";
+  for (unsigned j = 0; j < count + count2; j++) {
+  }
+  char *output = "test.txt";
 
   FILE *fp;
   fp = fopen(output, "w");
@@ -188,11 +211,10 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  for (unsigned i = 1; i <= NUM_POINTS; i++) {
-    fprintf(fp, "%lf \t %f \t %f \n",luminance[i], u_val[i], v_val[i]);
+  for (unsigned i = 1; i <= NUM_ROWS / 2; i++) {
+    fprintf(fp, "%lf \t %f \t %f \n", luminance[i], u_val[i], v_val[i]);
   }
 
   fclose(fp);
-
   exit(0);
 }
